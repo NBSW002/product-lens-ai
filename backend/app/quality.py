@@ -26,6 +26,24 @@ def _normalized(text: str) -> str:
 class QualityChecker:
     def check(self, facts: ProductFacts, analysis: ProductAnalysis) -> QualityReport:
         issues: list[QualityIssue] = []
+        required_content = (
+            ("EMPTY_TARGET_USERS", analysis.target_users, "目标用户为空。"),
+            ("EMPTY_SCENARIOS", analysis.scenarios, "使用场景为空。"),
+            ("EMPTY_PAIN_POINTS", analysis.pain_points, "用户痛点为空。"),
+            ("EMPTY_SELLING_POINTS", analysis.selling_points, "核心卖点为空。"),
+            ("EMPTY_VISUAL_FINDINGS", analysis.visual_findings, "图片观察为空。"),
+            ("EMPTY_VOICEOVER", analysis.voiceover.strip(), "短视频口播为空。"),
+        )
+        for code, value, message in required_content:
+            if not value:
+                issues.append(
+                    QualityIssue(
+                        code=code,
+                        severity="high",
+                        message=message,
+                        suggestion="补充有商品事实或图片证据支持的内容。",
+                    )
+                )
         evidence = " ".join(
             [
                 facts.title,
@@ -89,12 +107,12 @@ class QualityChecker:
             )
 
         deductions = {"low": 5, "medium": 12, "high": 24}
-        score = max(0, 100 - sum(deductions[issue.severity] for issue in issues))
+        all_empty = not any(value for _, value, _ in required_content)
+        score = 0 if all_empty else max(0, 100 - sum(deductions[issue.severity] for issue in issues))
         coverage = round(grounded / max(1, len(analysis.selling_points)) * 100)
         return QualityReport(
             score=score,
-            passed=score >= 80 and not any(issue.severity == "high" for issue in issues),
+            passed=score >= 80 and coverage > 0 and not any(issue.severity == "high" for issue in issues),
             evidence_coverage=coverage,
             issues=issues,
         )
-

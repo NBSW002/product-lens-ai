@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 
-import { createJob, getJob, retryJob } from "./api";
+import { createJob, getHealth, getJob, retryJob } from "./api";
+import { AnalysisTrace } from "./components/AnalysisTrace";
 import { InsightGrid } from "./components/InsightGrid";
 import { ProductSummary } from "./components/ProductSummary";
 import { ProgressTimeline } from "./components/ProgressTimeline";
@@ -14,6 +15,7 @@ export default function App() {
   const [url, setUrl] = useState("");
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState("");
+  const [mode, setMode] = useState<"demo" | "live" | "unavailable">("unavailable");
   const pollRef = useRef<number | null>(null);
 
   async function poll(id: string) {
@@ -28,7 +30,12 @@ export default function App() {
     }
   }
 
-  useEffect(() => () => { if (pollRef.current) window.clearTimeout(pollRef.current); }, []);
+  useEffect(() => {
+    void getHealth()
+      .then((health) => setMode(health.mode === "live" ? "live" : "demo"))
+      .catch(() => setMode("unavailable"));
+    return () => { if (pollRef.current) window.clearTimeout(pollRef.current); };
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -57,7 +64,7 @@ export default function App() {
     <div className="app-shell">
       <header className="topbar">
         <a className="brand" href="#top"><span>PA</span><strong>Product<span>Lens</span></strong></a>
-        <div className="mode-badge"><i /> Demo Ready</div>
+        <div className={`mode-badge ${mode}`}><i />{mode === "live" ? "真实 API" : mode === "demo" ? "演示模式" : "服务未连接"}</div>
       </header>
 
       <main id="top">
@@ -79,6 +86,7 @@ export default function App() {
         </section>
 
         {job && !job.result && job.status !== "failed" && <ProgressTimeline stage={job.stage} progress={job.progress} />}
+        {job && job.trace_events.length > 0 && <AnalysisTrace events={job.trace_events} />}
         {job?.status === "failed" && <div className="error-banner result-error" role="alert"><strong>分析失败</strong><span>{job.error}</span><button onClick={retry}>重新尝试</button></div>}
 
         {job?.result && (

@@ -50,3 +50,27 @@ def test_quality_checker_accepts_grounded_short_script() -> None:
     assert report.score >= 80
     assert report.passed is True
 
+
+def test_quality_checker_rejects_completely_empty_analysis_with_zero_score() -> None:
+    analysis = ProductAnalysis(
+        target_users=[],
+        scenarios=[],
+        pain_points=[],
+        selling_points=[],
+        visual_findings=[],
+        voiceover="",
+    )
+
+    report = QualityChecker().check(_facts(), analysis)
+
+    assert report.score == 0
+    assert report.evidence_coverage == 0
+    assert report.passed is False
+    assert {issue.code for issue in report.issues} >= {
+        "EMPTY_TARGET_USERS",
+        "EMPTY_SCENARIOS",
+        "EMPTY_PAIN_POINTS",
+        "EMPTY_SELLING_POINTS",
+        "EMPTY_VISUAL_FINDINGS",
+        "EMPTY_VOICEOVER",
+    }

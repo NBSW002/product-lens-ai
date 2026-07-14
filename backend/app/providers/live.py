@@ -25,6 +25,18 @@ def _parse_json_content(content: str) -> dict[str, Any]:
 
 class RainforestProductProvider:
     endpoint = "https://api.rainforestapi.com/request"
+    provider_name = "Rainforest"
+    field_sources = {
+        "title": "product.title",
+        "category": "product.categories[-1].name",
+        "price": "product.buybox_winner.price | product.price",
+        "currency": "product.buybox_winner.price.currency | product.price.currency",
+        "rating": "product.rating",
+        "review_count": "product.ratings_total",
+        "features": "product.feature_bullets",
+        "specifications": "product.specifications",
+        "images": "product.images_flat | product.images[].link",
+    }
 
     def __init__(self, api_key: str, client: httpx.Client | None = None) -> None:
         self.api_key = api_key
@@ -39,31 +51,42 @@ class RainforestProductProvider:
         try:
             response.raise_for_status()
             product = response.json()["product"]
+            if not isinstance(product, dict):
+                raise TypeError("product must be an object")
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             raise ProviderError("商品数据服务暂时不可用或未返回有效商品") from exc
 
-        categories = product.get("categories") or []
-        buybox = product.get("buybox_winner") or {}
-        price = buybox.get("price") or product.get("price") or {}
+        returned_asin = product.get("asin")
+        if returned_asin and str(returned_asin).upper() != link.asin.upper():
+            raise ProviderError(f"商品数据服务返回的 ASIN 与请求不一致：{returned_asin}")
+
+        categories = [item for item in product.get("categories", []) if isinstance(item, dict)] if isinstance(product.get("categories", []), list) else []
+        buybox = product.get("buybox_winner") if isinstance(product.get("buybox_winner"), dict) else {}
+        price_value = buybox.get("price") or product.get("price") or {}
+        price = price_value if isinstance(price_value, dict) else {"raw": str(price_value)}
+        specifications = product.get("specifications") if isinstance(product.get("specifications"), list) else []
         specs = {
             str(item.get("name")): str(item.get("value"))
-            for item in product.get("specifications") or []
-            if item.get("name") and item.get("value")
+            for item in specifications
+            if isinstance(item, dict) and item.get("name") and item.get("value")
         }
-        images_flat = product.get("images_flat") or ""
+        images_flat = product.get("images_flat") if isinstance(product.get("images_flat"), str) else ""
         images = [item.strip() for item in images_flat.split(",") if item.strip()]
         if not images:
-            images = [item.get("link") for item in product.get("images") or [] if item.get("link")]
+            image_items = product.get("images") if isinstance(product.get("images"), list) else []
+            images = [str(item.get("link")) for item in image_items if isinstance(item, dict) and item.get("link")]
+        feature_bullets = product.get("feature_bullets") if isinstance(product.get("feature_bullets"), list) else []
+        raw_price = price.get("raw") or price.get("value")
 
         return ProductFacts(
             asin=link.asin,
             title=product.get("title") or "未命名商品",
             category=(categories[-1].get("name") if categories else "未分类"),
-            price=price.get("raw") or price.get("value"),
+            price=str(raw_price) if raw_price is not None else None,
             currency=price.get("currency"),
             rating=product.get("rating"),
             review_count=product.get("ratings_total"),
-            features=product.get("feature_bullets") or [],
+            features=[str(item) for item in feature_bullets if str(item).strip()],
             specifications=specs,
             images=images[:8],
             source_url=link.canonical_url,
@@ -72,6 +95,7 @@ class RainforestProductProvider:
 
 class QwenVisionProvider:
     endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+    provider_name = "Qwen"
 
     def __init__(self, api_key: str, model: str = "qwen3-vl-plus", client: httpx.Client | None = None) -> None:
         self.api_key = api_key
@@ -96,7 +120,10 @@ class QwenVisionProvider:
         try:
             response.raise_for_status()
             payload = _parse_json_content(response.json()["choices"][0]["message"]["content"])
-            return [str(item) for item in payload.get("findings", []) if str(item).strip()]
+            findings = [str(item) for item in payload.get("findings", []) if str(item).strip()]
+            if not findings:
+                raise ProviderError("图片分析服务返回的图片观察为空")
+            return findings
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             if isinstance(exc, ProviderError):
                 raise
@@ -105,6 +132,7 @@ class QwenVisionProvider:
 
 class DeepSeekTextModel:
     endpoint = "https://api.deepseek.com/chat/completions"
+    provider_name = "DeepSeek"
 
     def __init__(self, api_key: str, model: str = "deepseek-v4-flash", client: httpx.Client | None = None) -> None:
         self.api_key = api_key
@@ -131,7 +159,18 @@ class DeepSeekTextModel:
         try:
             response.raise_for_status()
             payload = _parse_json_content(response.json()["choices"][0]["message"]["content"])
-            return ProductAnalysis.model_validate(payload)
+            analysis = ProductAnalysis.model_validate(payload)
+            required = (
+                analysis.target_users,
+                analysis.scenarios,
+                analysis.pain_points,
+                analysis.selling_points,
+                analysis.visual_findings,
+                analysis.voiceover.strip(),
+            )
+            if not all(required):
+                raise ProviderError("DeepSeek 返回的分析内容为空或不完整")
+            return analysis
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             if isinstance(exc, ProviderError):
                 raise
@@ -161,4 +200,3 @@ class DeepSeekTextModel:
             f"质量问题：{json.dumps(issue_messages, ensure_ascii=False)}\n"
             "输出与原分析完全相同的 JSON 字段。"
         )
-

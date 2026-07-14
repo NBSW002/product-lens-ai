@@ -1,4 +1,4 @@
-import type { Job } from "./types";
+import type { HealthStatus, Job } from "./types";
 
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -28,3 +28,7 @@ export function retryJob(id: string): Promise<Job> {
   return request<Job>(`/api/jobs/${id}/retry`, { method: "POST" });
 }
 
+
+export function getHealth(): Promise<HealthStatus> {
+  return request<HealthStatus>("/api/health");
+}

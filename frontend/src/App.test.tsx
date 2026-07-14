@@ -15,6 +15,14 @@ const completedJob = {
   stage: "COMPLETED",
   progress: 100,
   error: null,
+  trace_events: [
+    {
+      id: "product_fetch", stage: "PRODUCT_FETCH" as const, title: "商品抓取", status: "completed" as const,
+      provider: "Rainforest", model: null, started_at: "2026-07-14T00:00:00Z", finished_at: "2026-07-14T00:00:01Z",
+      duration_ms: 1000, input: { asin: "B0CXT9RSGQ" }, output: { title: "VTOY 便携折叠露营椅" },
+      field_sources: { title: "product.title" }, error: null,
+    },
+  ],
   result: {
     facts: {
       asin: "B0CXT9RSGQ",
@@ -44,6 +52,7 @@ const completedJob = {
 };
 
 beforeEach(() => {
+  vi.mocked(api.getHealth).mockResolvedValue({ status: "ok", mode: "live" });
   vi.mocked(api.createJob).mockResolvedValue({ ...completedJob, status: "queued", result: null, progress: 0 });
   vi.mocked(api.getJob).mockResolvedValue(completedJob);
 });
@@ -60,6 +69,8 @@ test("submits an Amazon link and renders the complete analysis", async () => {
   expect(screen.getByText("质量评分")).toBeInTheDocument();
   expect(screen.getByText("96")).toBeInTheDocument();
   expect(screen.getByText(completedJob.result.analysis.voiceover)).toBeInTheDocument();
+  expect(screen.getByText("分析过程")).toBeInTheDocument();
+  expect(await screen.findByText("真实 API")).toBeInTheDocument();
   expect(api.createJob).toHaveBeenCalledWith(completedJob.url);
 });
 
@@ -73,4 +84,3 @@ test("shows a useful error when the API rejects the request", async () => {
 
   expect(await screen.findByRole("alert")).toHaveTextContent("仅支持公开的 Amazon HTTPS 商品链接");
 });
-

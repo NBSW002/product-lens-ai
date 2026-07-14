@@ -47,6 +47,33 @@ class AnalysisResult(BaseModel):
     quality: QualityReport
 
 
+TraceStage = Literal[
+    "PRODUCT_FETCH",
+    "VISION_ANALYSIS",
+    "TEXT_DRAFT",
+    "QUALITY_CHECK",
+    "TEXT_REVISION",
+    "FINALIZE",
+]
+TraceStatus = Literal["pending", "running", "completed", "failed", "skipped"]
+
+
+class TraceEvent(BaseModel):
+    id: str
+    stage: TraceStage
+    title: str
+    status: TraceStatus = "pending"
+    provider: str
+    model: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    duration_ms: int | None = None
+    input: dict[str, object] = Field(default_factory=dict)
+    output: dict[str, object] = Field(default_factory=dict)
+    field_sources: dict[str, str] = Field(default_factory=dict)
+    error: str | None = None
+
+
 class CreateJobRequest(BaseModel):
     url: str
 
@@ -59,6 +86,6 @@ class Job(BaseModel):
     progress: int = 0
     result: AnalysisResult | None = None
     error: str | None = None
+    trace_events: list[TraceEvent] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-

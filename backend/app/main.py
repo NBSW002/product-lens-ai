@@ -3,8 +3,8 @@ import os
 from fastapi import BackgroundTasks, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.jobs import JobRepository
-from app.models import CreateJobRequest, Job
+from app.jobs import JobRepository, new_trace_events
+from app.models import CreateJobRequest, Job, TraceStage
 from app.providers import (
     DeepSeekTextModel,
     DemoProductProvider,
@@ -55,10 +55,30 @@ def run_job(job_id: str) -> None:
     if not job:
         return
     repository.update(job_id, status="running")
+
+    def record_trace(action: str, stage: TraceStage, payload: dict[str, object]) -> None:
+        if action == "start":
+            input_data = payload.get("input")
+            repository.start_trace(job_id, stage, input_data=input_data if isinstance(input_data, dict) else {})
+        elif action == "complete":
+            output = payload.get("output")
+            field_sources = payload.get("field_sources")
+            repository.complete_trace(
+                job_id,
+                stage,
+                output=output if isinstance(output, dict) else {},
+                field_sources=field_sources if isinstance(field_sources, dict) else {},
+            )
+        elif action == "fail":
+            repository.fail_trace(job_id, stage, str(payload.get("error") or "阶段执行失败"))
+        elif action == "skip":
+            repository.skip_trace(job_id, stage, str(payload.get("reason") or "已跳过"))
+
     try:
         result = service.run(
             job.url,
             on_progress=lambda stage, progress: repository.update(job_id, stage=stage, progress=progress),
+            on_trace=record_trace,
         )
         repository.update(job_id, status="completed", stage="COMPLETED", progress=100, result=result)
     except Exception as exc:
@@ -94,6 +114,14 @@ def retry_job(job_id: str, background_tasks: BackgroundTasks) -> Job:
     job = repository.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="任务不存在")
-    updated = repository.update(job_id, status="queued", stage="QUEUED", progress=0, error=None, result=None)
+    updated = repository.update(
+        job_id,
+        status="queued",
+        stage="QUEUED",
+        progress=0,
+        error=None,
+        result=None,
+        trace_events=new_trace_events(),
+    )
     background_tasks.add_task(run_job, job_id)
     return updated
