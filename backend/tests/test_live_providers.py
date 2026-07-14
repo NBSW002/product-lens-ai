@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from app.models import ProductFacts
+from app.models import ProductAnalysis, ProductFacts
 from app.providers.live import DeepSeekTextModel, ProviderError, QwenVisionProvider, RainforestProductProvider
 from app.url_parser import parse_amazon_url
 
@@ -136,3 +136,42 @@ def test_deepseek_model_rejects_empty_analysis_content() -> None:
 
     with pytest.raises(ProviderError, match="内容为空"):
         model.analyze(facts, ["可见遮阳篷"])
+
+
+def test_deepseek_revision_merges_partial_response_with_unchanged_fields() -> None:
+    partial_revision = {
+        "selling_points": ["可折叠"],
+        "voiceover": "露营装备总是难带吗？这把椅子采用可折叠设计，收起后方便携带。",
+    }
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(partial_revision, ensure_ascii=False)}}]},
+        )
+
+    model = DeepSeekTextModel("deep-key", client=_client(handler))
+    facts = ProductFacts(
+        asin="B0CXT9RSGQ",
+        title="折叠椅",
+        category="户外椅",
+        features=["可折叠"],
+        source_url="https://amazon.com/dp/B0CXT9RSGQ",
+    )
+    original = ProductAnalysis(
+        target_users=["露营用户"],
+        scenarios=["营地"],
+        pain_points=["携带不便"],
+        selling_points=["不存在功能"],
+        visual_findings=["可见遮阳篷"],
+        voiceover="旧文案？包含不存在功能。",
+    )
+
+    revised = model.revise(facts, original, ["删除无依据卖点"])
+
+    assert revised.target_users == original.target_users
+    assert revised.scenarios == original.scenarios
+    assert revised.pain_points == original.pain_points
+    assert revised.visual_findings == original.visual_findings
+    assert revised.selling_points == ["可折叠"]
+    assert revised.voiceover == partial_revision["voiceover"]

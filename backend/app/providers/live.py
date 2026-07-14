@@ -139,7 +139,7 @@ class DeepSeekTextModel:
         self.model = model
         self.client = client or httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0))
 
-    def _complete(self, prompt: str) -> ProductAnalysis:
+    def _request_json(self, prompt: str) -> dict[str, Any]:
         response = self.client.post(
             self.endpoint,
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -158,23 +158,32 @@ class DeepSeekTextModel:
         )
         try:
             response.raise_for_status()
-            payload = _parse_json_content(response.json()["choices"][0]["message"]["content"])
-            analysis = ProductAnalysis.model_validate(payload)
-            required = (
-                analysis.target_users,
-                analysis.scenarios,
-                analysis.pain_points,
-                analysis.selling_points,
-                analysis.visual_findings,
-                analysis.voiceover.strip(),
-            )
-            if not all(required):
-                raise ProviderError("DeepSeek 返回的分析内容为空或不完整")
-            return analysis
+            return _parse_json_content(response.json()["choices"][0]["message"]["content"])
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             if isinstance(exc, ProviderError):
                 raise
             raise ProviderError("DeepSeek 分析服务暂时不可用") from exc
+
+    def _validate_analysis(self, payload: dict[str, Any]) -> ProductAnalysis:
+        try:
+            analysis = ProductAnalysis.model_validate(payload)
+        except ValueError as exc:
+            raise ProviderError("DeepSeek 分析服务暂时不可用") from exc
+
+        required = (
+            analysis.target_users,
+            analysis.scenarios,
+            analysis.pain_points,
+            analysis.selling_points,
+            analysis.visual_findings,
+            analysis.voiceover.strip(),
+        )
+        if not all(required):
+            raise ProviderError("DeepSeek 返回的分析内容为空或不完整")
+        return analysis
+
+    def _complete(self, prompt: str) -> ProductAnalysis:
+        return self._validate_analysis(self._request_json(prompt))
 
     def analyze(self, facts: ProductFacts, visual_findings: list[str]) -> ProductAnalysis:
         schema = {
@@ -193,10 +202,21 @@ class DeepSeekTextModel:
         )
 
     def revise(self, facts: ProductFacts, analysis: ProductAnalysis, issue_messages: list[str]) -> ProductAnalysis:
-        return self._complete(
+        schema = {
+            "target_users": ["目标用户，非空数组"],
+            "scenarios": ["使用场景，非空数组"],
+            "pain_points": ["用户痛点，非空数组"],
+            "selling_points": ["必须可由证据支持的卖点，非空数组"],
+            "visual_findings": ["图片观察，非空数组"],
+            "voiceover": "150字以内中文口播，非空字符串",
+        }
+        payload = self._request_json(
             "修订以下分析，只解决质量问题，保持有证据的内容。口播不超过150字。\n"
             f"商品事实：{facts.model_dump_json(exclude={'images'})}\n"
             f"原分析：{analysis.model_dump_json()}\n"
             f"质量问题：{json.dumps(issue_messages, ensure_ascii=False)}\n"
-            "输出与原分析完全相同的 JSON 字段。"
+            f"输出完整 JSON，必须包含以下所有字段且不得为空：{json.dumps(schema, ensure_ascii=False)}"
         )
+        merged = analysis.model_dump(mode="json")
+        merged.update({key: value for key, value in payload.items() if key in merged})
+        return self._validate_analysis(merged)
