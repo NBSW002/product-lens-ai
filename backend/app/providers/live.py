@@ -35,12 +35,53 @@ class RainforestProductProvider:
         "review_count": "product.ratings_total",
         "features": "product.feature_bullets",
         "specifications": "product.specifications",
+        "evidence_texts": "product.description | product.feature_sections | product.a_plus_content | product.product_overview",
         "images": "product.images_flat | product.images[].link",
     }
 
     def __init__(self, api_key: str, client: httpx.Client | None = None) -> None:
         self.api_key = api_key
         self.client = client or httpx.Client(timeout=httpx.Timeout(25.0, connect=10.0))
+
+    def _collect_evidence_texts(self, product: dict[str, Any]) -> list[str]:
+        evidence_keys = {
+            "description",
+            "feature_sections",
+            "a_plus_content",
+            "product_overview",
+            "technical_details",
+            "important_information",
+            "product_description",
+            "detail_bullets",
+        }
+        texts: list[str] = []
+
+        def visit(value: Any, parent_key: str = "") -> None:
+            if isinstance(value, str):
+                text = re.sub(r"\s+", " ", value).strip()
+                if text and (parent_key in evidence_keys or len(text) >= 18):
+                    texts.append(text)
+                return
+            if isinstance(value, list):
+                for item in value:
+                    visit(item, parent_key)
+                return
+            if isinstance(value, dict):
+                for key, nested in value.items():
+                    visit(nested, str(key))
+
+        for key in evidence_keys:
+            if key in product:
+                visit(product[key], key)
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for text in texts:
+            normalized = text.lower()
+            if normalized not in seen:
+                seen.add(normalized)
+                deduped.append(text)
+        return deduped[:40]
 
     def fetch(self, link: AmazonLink) -> ProductFacts:
         domain = link.marketplace_host
@@ -88,6 +129,7 @@ class RainforestProductProvider:
             review_count=product.get("ratings_total"),
             features=[str(item) for item in feature_bullets if str(item).strip()],
             specifications=specs,
+            evidence_texts=self._collect_evidence_texts(product),
             images=images[:8],
             source_url=link.canonical_url,
         )

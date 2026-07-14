@@ -23,7 +23,70 @@ def _normalized(text: str) -> str:
     return re.sub(r"[\s，。！？、：；,.!?%\-]", "", text.lower()).replace("带", "")
 
 
+def _evidence_text(facts: ProductFacts, visual_findings: list[str]) -> str:
+    return " ".join(
+        [
+            facts.title,
+            facts.category,
+            *facts.features,
+            *facts.specifications.keys(),
+            *facts.specifications.values(),
+            *facts.evidence_texts,
+            *visual_findings,
+        ]
+    )
+
+
+def _short_claim(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip(" -•·")
+    parts = re.split(r"[。.!?；;]", cleaned)
+    return (parts[0] if parts else cleaned).strip()[:90]
+
+
 class QualityChecker:
+    def is_claim_supported(self, facts: ProductFacts, visual_findings: list[str], claim: str) -> bool:
+        normalized_evidence = _normalized(_evidence_text(facts, visual_findings))
+        normalized_claim = _normalized(claim)
+        return bool(normalized_claim) and (
+            normalized_claim in normalized_evidence
+            or any(
+                _normalized(token) in normalized_evidence
+                for token in re.split(r"[，、,;；并且和]", claim)
+                if len(_normalized(token)) >= 2
+            )
+        )
+
+    def fallback_selling_points(self, facts: ProductFacts, visual_findings: list[str], limit: int = 4) -> list[str]:
+        candidates: list[str] = []
+        candidates.extend(facts.features)
+        candidates.extend(f"{key}: {value}" for key, value in facts.specifications.items())
+        candidates.extend(facts.evidence_texts)
+        candidates.extend(visual_findings)
+
+        points: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            point = _short_claim(candidate)
+            normalized = _normalized(point)
+            if not normalized or normalized in seen:
+                continue
+            if self.is_claim_supported(facts, visual_findings, point):
+                seen.add(normalized)
+                points.append(point)
+            if len(points) >= limit:
+                break
+        return points
+
+    def repair_unsupported_claims(self, facts: ProductFacts, analysis: ProductAnalysis) -> ProductAnalysis:
+        supported = [
+            claim
+            for claim in analysis.selling_points
+            if self.is_claim_supported(facts, analysis.visual_findings, claim)
+        ]
+        if not supported:
+            supported = self.fallback_selling_points(facts, analysis.visual_findings)
+        return analysis.model_copy(update={"selling_points": supported})
+
     def check(self, facts: ProductFacts, analysis: ProductAnalysis) -> QualityReport:
         issues: list[QualityIssue] = []
         required_content = (
@@ -44,18 +107,6 @@ class QualityChecker:
                         suggestion="补充有商品事实或图片证据支持的内容。",
                     )
                 )
-        evidence = " ".join(
-            [
-                facts.title,
-                facts.category,
-                *facts.features,
-                *facts.specifications.keys(),
-                *facts.specifications.values(),
-                *analysis.visual_findings,
-            ]
-        )
-        normalized_evidence = _normalized(evidence)
-
         if any(term.lower() in analysis.voiceover.lower() or term.lower() in " ".join(analysis.selling_points).lower() for term in EXAGGERATION_TERMS):
             issues.append(
                 QualityIssue(
@@ -68,11 +119,7 @@ class QualityChecker:
 
         grounded = 0
         for claim in analysis.selling_points:
-            normalized_claim = _normalized(claim)
-            claim_grounded = bool(normalized_claim) and (
-                normalized_claim in normalized_evidence
-                or any(_normalized(token) in normalized_evidence for token in re.split(r"[，、并且和]", claim) if len(_normalized(token)) >= 2)
-            )
+            claim_grounded = self.is_claim_supported(facts, analysis.visual_findings, claim)
             if claim_grounded:
                 grounded += 1
             else:

@@ -121,12 +121,19 @@ class AnalysisService:
             except Exception as exc:
                 fail_stage("TEXT_REVISION", exc, ["FINALIZE"])
                 raise
-            trace("complete", "TEXT_REVISION", {"output": analysis.model_dump(mode="json")})
+            fallback_applied = False
             try:
                 quality = self.quality_checker.check(facts, analysis)
+                if not quality.passed and any(issue.code == "UNSUPPORTED_CLAIM" for issue in quality.issues):
+                    repaired = self.quality_checker.repair_unsupported_claims(facts, analysis)
+                    if repaired.selling_points != analysis.selling_points:
+                        analysis = repaired
+                        quality = self.quality_checker.check(facts, analysis)
+                        fallback_applied = True
             except Exception as exc:
                 fail_stage("QUALITY_CHECK", exc, ["FINALIZE"])
                 raise
+            trace("complete", "TEXT_REVISION", {"output": analysis.model_dump(mode="json"), "fallback_applied": fallback_applied})
             trace(
                 "complete",
                 "QUALITY_CHECK",

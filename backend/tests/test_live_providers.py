@@ -27,6 +27,7 @@ def test_rainforest_provider_normalizes_product_payload() -> None:
                     "rating": 4.5,
                     "ratings_total": 120,
                     "feature_bullets": ["Foldable", "Sun shade"],
+                    "description": "Built for outdoor events with a folding frame and shade canopy.",
                     "specifications": [{"name": "Material", "value": "Oxford cloth"}],
                     "images_flat": "https://img/1.jpg,https://img/2.jpg",
                 }
@@ -39,6 +40,7 @@ def test_rainforest_provider_normalizes_product_payload() -> None:
     assert facts.title == "Camping chair"
     assert facts.price == "$89.99"
     assert facts.specifications["Material"] == "Oxford cloth"
+    assert "folding frame" in " ".join(facts.evidence_texts)
     assert len(facts.images) == 2
     assert provider.field_sources["title"] == "product.title"
 

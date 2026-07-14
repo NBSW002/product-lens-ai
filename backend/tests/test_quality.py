@@ -51,6 +51,33 @@ def test_quality_checker_accepts_grounded_short_script() -> None:
     assert report.passed is True
 
 
+def test_quality_checker_accepts_claims_grounded_by_extra_evidence_texts() -> None:
+    facts = ProductFacts(
+        asin="B07FZ8S74R",
+        title="Echo Dot",
+        category="Smart speakers",
+        features=[],
+        evidence_texts=[
+            "Voice control your music from Amazon Music, Apple Music, Spotify, Sirius XM, and others.",
+            "Built with multiple layers of privacy controls including a microphone off button.",
+        ],
+        source_url="https://amazon.com/dp/B07FZ8S74R",
+    )
+    analysis = ProductAnalysis(
+        target_users=["Smart home users"],
+        scenarios=["Music playback"],
+        pain_points=["Hands-free control is needed"],
+        selling_points=["Voice control your music", "Privacy controls including a microphone off button"],
+        visual_findings=["Product image shows a compact Echo speaker"],
+        voiceover="Need hands-free music control? This Echo speaker supports voice music control and a microphone off button.",
+    )
+
+    report = QualityChecker().check(facts, analysis)
+
+    assert report.passed is True
+    assert report.evidence_coverage == 100
+
+
 def test_quality_checker_rejects_completely_empty_analysis_with_zero_score() -> None:
     analysis = ProductAnalysis(
         target_users=[],

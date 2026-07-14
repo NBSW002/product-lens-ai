@@ -14,6 +14,7 @@ class ProductFacts(BaseModel):
     review_count: int | None = None
     features: list[str] = Field(default_factory=list)
     specifications: dict[str, str] = Field(default_factory=dict)
+    evidence_texts: list[str] = Field(default_factory=list)
     images: list[str] = Field(default_factory=list)
     source_url: str
 

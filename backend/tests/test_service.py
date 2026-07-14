@@ -1,6 +1,6 @@
 import pytest
 
-from app.models import ProductAnalysis, QualityIssue, QualityReport
+from app.models import ProductAnalysis, ProductFacts, QualityIssue, QualityReport
 from app.providers import DemoProductProvider, DemoTextModel, DemoVisionProvider
 from app.service import AnalysisService
 
@@ -100,6 +100,44 @@ def test_pipeline_preserves_draft_when_revision_is_required() -> None:
     assert draft["selling_points"] == ["不存在功能"]
     assert revision["selling_points"] == ["可折叠设计"]
     assert result.quality.passed is True
+
+
+def test_pipeline_applies_deterministic_fallback_when_revision_keeps_unsupported_claims() -> None:
+    class ProductProvider:
+        def fetch(self, _link) -> ProductFacts:
+            return ProductFacts(
+                asin="B07FZ8S74R",
+                title="Echo Dot smart speaker",
+                category="Smart speakers",
+                features=["Voice control your music"],
+                evidence_texts=["Voice control your music from Amazon Music, Apple Music, Spotify, and others."],
+                images=["https://example.com/echo.jpg"],
+                source_url="https://amazon.com/dp/B07FZ8S74R",
+            )
+
+    class VisionProvider:
+        def analyze(self, _images: list[str]) -> list[str]:
+            return ["Product image shows a compact smart speaker"]
+
+    class TextModel:
+        def analyze(self, _facts, visual_findings: list[str]) -> ProductAnalysis:
+            return ProductAnalysis(
+                target_users=["Smart speaker users"],
+                scenarios=["Music playback"],
+                pain_points=["Hands-free control is needed"],
+                selling_points=["Unsupported home automation claim"],
+                visual_findings=visual_findings,
+                voiceover="Need hands-free control? This speaker can help with music playback.",
+            )
+
+        def revise(self, _facts, analysis: ProductAnalysis, _issues: list[str]) -> ProductAnalysis:
+            return analysis.model_copy(update={"selling_points": ["Unsupported home automation claim"]})
+
+    result = AnalysisService(ProductProvider(), VisionProvider(), TextModel()).run("https://www.amazon.com/dp/B07FZ8S74R")
+
+    assert result.quality.passed is True
+    assert "Unsupported home automation claim" not in result.analysis.selling_points
+    assert "Voice control your music" in result.analysis.selling_points
 
 
 def test_first_quality_exception_fails_active_stage_and_skips_later_stages() -> None:
