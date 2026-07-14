@@ -101,7 +101,11 @@ class AnalysisService:
 
         report("CHECKING_QUALITY", 85)
         trace("start", "QUALITY_CHECK", {"input": {"draft": analysis.model_dump(mode="json")}})
-        quality = self.quality_checker.check(facts, analysis)
+        try:
+            quality = self.quality_checker.check(facts, analysis)
+        except Exception as exc:
+            fail_stage("QUALITY_CHECK", exc, ["TEXT_REVISION", "FINALIZE"])
+            raise
         initial_quality = quality.model_dump(mode="json")
         trace("complete", "QUALITY_CHECK", {"output": {"initial": initial_quality}})
         if not quality.passed:
@@ -118,7 +122,11 @@ class AnalysisService:
                 fail_stage("TEXT_REVISION", exc, ["FINALIZE"])
                 raise
             trace("complete", "TEXT_REVISION", {"output": analysis.model_dump(mode="json")})
-            quality = self.quality_checker.check(facts, analysis)
+            try:
+                quality = self.quality_checker.check(facts, analysis)
+            except Exception as exc:
+                fail_stage("QUALITY_CHECK", exc, ["FINALIZE"])
+                raise
             trace(
                 "complete",
                 "QUALITY_CHECK",

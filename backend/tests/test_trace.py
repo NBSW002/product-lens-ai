@@ -1,5 +1,5 @@
 from app.jobs import JobRepository
-from app.trace import sanitize_trace_value
+from app.trace import sanitize_error, sanitize_trace_value
 
 
 def test_job_starts_with_six_pending_trace_events_in_pipeline_order() -> None:
@@ -48,3 +48,13 @@ def test_sanitizer_bounds_text_and_list_size() -> None:
     assert len(sanitized["value"]) < 2100
     assert len(sanitized["items"]) == 25
 
+
+def test_error_sanitizer_removes_credentials_from_unexpected_exception_text() -> None:
+    message = "request failed: https://example.test/?api_key=topsecret Authorization: Bearer abcdefghijklmnop sk-secretvalue"
+
+    sanitized = sanitize_error(message)
+
+    assert "topsecret" not in sanitized
+    assert "abcdefghijklmnop" not in sanitized
+    assert "sk-secretvalue" not in sanitized
+    assert "[REDACTED]" in sanitized

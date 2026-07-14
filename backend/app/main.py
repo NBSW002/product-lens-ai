@@ -14,6 +14,7 @@ from app.providers import (
     RainforestProductProvider,
 )
 from app.service import AnalysisService
+from app.trace import sanitize_error
 from app.url_parser import InvalidAmazonUrl, parse_amazon_url
 
 
@@ -82,7 +83,7 @@ def run_job(job_id: str) -> None:
         )
         repository.update(job_id, status="completed", stage="COMPLETED", progress=100, result=result)
     except Exception as exc:
-        repository.update(job_id, status="failed", stage="FAILED", error=str(exc))
+        repository.update(job_id, status="failed", stage="FAILED", error=sanitize_error(str(exc)))
 
 
 @app.get("/api/health")
@@ -114,6 +115,8 @@ def retry_job(job_id: str, background_tasks: BackgroundTasks) -> Job:
     job = repository.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="任务不存在")
+    if job.status in {"queued", "running"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="任务仍在运行，不能重复启动")
     updated = repository.update(
         job_id,
         status="queued",

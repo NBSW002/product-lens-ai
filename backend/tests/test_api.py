@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import app, repository
 
 
 client = TestClient(app)
@@ -46,5 +46,14 @@ def test_rejects_non_amazon_url() -> None:
 
     assert response.status_code == 422
     assert "Amazon" in response.json()["detail"]
-import json
 
+
+def test_retry_rejects_job_that_is_still_running() -> None:
+    job = repository.create("https://www.amazon.com/dp/B0CXT9RSGQ")
+    repository.update(job.id, status="running")
+
+    response = client.post(f"/api/jobs/{job.id}/retry")
+
+    assert response.status_code == 409
+    assert "运行" in response.json()["detail"]
+import json

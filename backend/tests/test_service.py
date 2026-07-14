@@ -1,6 +1,6 @@
 import pytest
 
-from app.models import ProductAnalysis
+from app.models import ProductAnalysis, QualityIssue, QualityReport
 from app.providers import DemoProductProvider, DemoTextModel, DemoVisionProvider
 from app.service import AnalysisService
 
@@ -100,3 +100,67 @@ def test_pipeline_preserves_draft_when_revision_is_required() -> None:
     assert draft["selling_points"] == ["不存在功能"]
     assert revision["selling_points"] == ["可折叠设计"]
     assert result.quality.passed is True
+
+
+def test_first_quality_exception_fails_active_stage_and_skips_later_stages() -> None:
+    class BrokenQualityChecker:
+        def check(self, _facts, _analysis):
+            raise RuntimeError("quality exploded")
+
+    traces: list[tuple[str, str, dict[str, object]]] = []
+    service = AnalysisService(DemoProductProvider(), DemoVisionProvider(), DemoTextModel())
+    service.quality_checker = BrokenQualityChecker()  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError, match="quality exploded"):
+        service.run(
+            "https://www.amazon.com/dp/B0CXT9RSGQ",
+            on_trace=lambda action, stage, payload: traces.append((action, stage, payload)),
+        )
+
+    assert [(action, stage) for action, stage, _ in traces][-3:] == [
+        ("fail", "QUALITY_CHECK"),
+        ("skip", "TEXT_REVISION"),
+        ("skip", "FINALIZE"),
+    ]
+
+
+def test_second_quality_exception_fails_quality_and_skips_finalize() -> None:
+    class RevisionModel:
+        def analyze(self, _facts, visual_findings):
+            return ProductAnalysis(
+                target_users=["用户"], scenarios=["场景"], pain_points=["痛点"],
+                selling_points=["不存在功能"], visual_findings=visual_findings, voiceover="还在苦恼吗？不存在功能。",
+            )
+
+        def revise(self, _facts, _analysis, _issues):
+            return ProductAnalysis(
+                target_users=["用户"], scenarios=["场景"], pain_points=["痛点"],
+                selling_points=["可折叠设计"], visual_findings=["主图可见顶部遮阳篷"], voiceover="还在苦恼吗？采用可折叠设计。",
+            )
+
+    class BrokenSecondQualityChecker:
+        calls = 0
+
+        def check(self, _facts, _analysis):
+            self.calls += 1
+            if self.calls == 1:
+                return QualityReport(
+                    score=0, passed=False, evidence_coverage=0,
+                    issues=[QualityIssue(code="TEST", severity="high", message="需修订", suggestion="修订")],
+                )
+            raise RuntimeError("second quality exploded")
+
+    traces: list[tuple[str, str, dict[str, object]]] = []
+    service = AnalysisService(DemoProductProvider(), DemoVisionProvider(), RevisionModel())
+    service.quality_checker = BrokenSecondQualityChecker()  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError, match="second quality exploded"):
+        service.run(
+            "https://www.amazon.com/dp/B0CXT9RSGQ",
+            on_trace=lambda action, stage, payload: traces.append((action, stage, payload)),
+        )
+
+    assert [(action, stage) for action, stage, _ in traces][-2:] == [
+        ("fail", "QUALITY_CHECK"),
+        ("skip", "FINALIZE"),
+    ]

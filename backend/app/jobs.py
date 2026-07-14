@@ -2,8 +2,8 @@ from datetime import datetime, timezone
 from threading import Lock
 from uuid import uuid4
 
-from app.models import Job, TraceEvent, TraceStage
-from app.trace import sanitize_trace_value
+from app.models import Job, TraceEvent, TraceStage, TraceStatus
+from app.trace import sanitize_error, sanitize_trace_value
 
 
 TRACE_DEFINITIONS: tuple[tuple[TraceStage, str, str, str | None], ...] = (
@@ -73,33 +73,37 @@ class JobRepository:
         output: dict[str, object] | None = None,
         field_sources: dict[str, str] | None = None,
     ) -> Job:
-        job = self.get(job_id)
-        event = next(item for item in job.trace_events if item.stage == stage)  # type: ignore[union-attr]
-        finished_at = datetime.now(timezone.utc)
-        duration_ms = int((finished_at - (event.started_at or finished_at)).total_seconds() * 1000)
-        return self._update_trace(
-            job_id,
-            stage,
-            status="completed",
-            finished_at=finished_at,
-            duration_ms=max(0, duration_ms),
-            output=sanitize_trace_value(output or {}),
-            field_sources=field_sources or {},
-        )
+        return self._finish_trace(job_id, stage, "completed", output, field_sources, None)
 
     def fail_trace(self, job_id: str, stage: TraceStage, error: str) -> Job:
-        job = self.get(job_id)
-        event = next(item for item in job.trace_events if item.stage == stage)  # type: ignore[union-attr]
-        finished_at = datetime.now(timezone.utc)
-        duration_ms = int((finished_at - (event.started_at or finished_at)).total_seconds() * 1000)
-        return self._update_trace(
-            job_id,
-            stage,
-            status="failed",
-            finished_at=finished_at,
-            duration_ms=max(0, duration_ms),
-            error=error,
-        )
+        return self._finish_trace(job_id, stage, "failed", None, None, sanitize_error(error))
+
+    def _finish_trace(
+        self,
+        job_id: str,
+        stage: TraceStage,
+        trace_status: TraceStatus,
+        output: dict[str, object] | None,
+        field_sources: dict[str, str] | None,
+        error: str | None,
+    ) -> Job:
+        with self._lock:
+            job = self._jobs[job_id]
+            event = next(item for item in job.trace_events if item.stage == stage)
+            finished_at = datetime.now(timezone.utc)
+            duration_ms = int((finished_at - (event.started_at or finished_at)).total_seconds() * 1000)
+            changes = {
+                "status": trace_status,
+                "finished_at": finished_at,
+                "duration_ms": max(0, duration_ms),
+                "output": event.output if output is None else sanitize_trace_value(output),
+                "field_sources": event.field_sources if field_sources is None else field_sources,
+                "error": error,
+            }
+            events = [item.model_copy(update=changes) if item.stage == stage else item for item in job.trace_events]
+            updated = job.model_copy(update={"trace_events": events, "updated_at": finished_at})
+            self._jobs[job_id] = updated
+            return updated
 
     def skip_trace(self, job_id: str, stage: TraceStage, reason: str) -> Job:
         now = datetime.now(timezone.utc)

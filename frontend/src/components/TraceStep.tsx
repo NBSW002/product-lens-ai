@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { TraceEvent, TraceStatus } from "../types";
 
@@ -17,6 +17,9 @@ function JsonBlock({ title, value }: { title: string; value: Record<string, unkn
 
 export function TraceStep({ event }: { event: TraceEvent }) {
   const [expanded, setExpanded] = useState(event.status === "running" || event.status === "failed");
+  useEffect(() => {
+    if (event.status === "running" || event.status === "failed") setExpanded(true);
+  }, [event.status]);
   return (
     <article className={`trace-step ${event.status}`}>
       <button type="button" className="trace-toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
@@ -40,4 +43,3 @@ export function TraceStep({ event }: { event: TraceEvent }) {
     </article>
   );
 }
-

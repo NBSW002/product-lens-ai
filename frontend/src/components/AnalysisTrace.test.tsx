@@ -39,3 +39,13 @@ test("shows failed stage error without hiding previous evidence", () => {
   expect(screen.getByText("图片观察为空")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /商品抓取/ })).toBeInTheDocument();
 });
+
+test("automatically expands a step when polling changes it to running", () => {
+  const pending = { ...events[0], status: "pending" as const };
+  const { rerender } = render(<AnalysisTrace events={[pending]} />);
+  expect(screen.getByRole("button", { name: /商品抓取/ })).toHaveAttribute("aria-expanded", "false");
+
+  rerender(<AnalysisTrace events={[{ ...pending, status: "running" }]} />);
+
+  expect(screen.getByRole("button", { name: /商品抓取/ })).toHaveAttribute("aria-expanded", "true");
+});
