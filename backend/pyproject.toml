@@ -2,8 +2,20 @@
 name = "ai-product-assistant-backend"
 version = "0.1.0"
 requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.115.7",
+    "httpx==0.28.1",
+    "cryptography==45.0.5",
+    "pydantic==2.10.6",
+    "pymysql==1.1.1",
+    "uvicorn[standard]==0.34.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.4",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-

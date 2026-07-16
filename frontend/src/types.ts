@@ -65,6 +65,8 @@ export interface TraceEvent {
 export interface HealthStatus {
   status: string;
   mode: "demo" | "live" | string;
+  auth?: boolean;
+  history?: boolean;
 }
 
 export interface Job {
@@ -78,4 +80,45 @@ export interface Job {
   trace_events: TraceEvent[];
   created_at: string;
   updated_at: string;
+}
+
+export interface User {
+  id: number;
+  email: string;
+  username: string | null;
+  role: string;
+  status: string;
+  points_balance: number;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  user: User;
+  access_token: string;
+  token_type: "bearer";
+}
+
+export interface RegisterPayload {
+  email: string;
+  username?: string;
+  password: string;
+}
+
+export interface LoginPayload {
+  email: string;
+  password: string;
+}
+
+export interface PointsResponse {
+  balance: number;
+}
+
+export interface LedgerEntry {
+  id: number;
+  job_id: string | null;
+  change_amount: number;
+  balance_after: number;
+  reason: string;
+  status: string;
+  created_at: string;
 }
